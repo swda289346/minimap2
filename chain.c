@@ -19,29 +19,9 @@ static inline int ilog2_32(uint32_t v)
 	return (t = v>>8) ? 8 + LogTable256[t] : LogTable256[v];
 }
 
-mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter, int min_cnt, int min_sc, int is_cdna, int n_segs, int64_t n, mm128_t *a, int *n_u_, uint64_t **_u, void *km)
-{ // TODO: make sure this works when n has more than 32 bits
-	int32_t k, *f, *p, *t, *v, n_u, n_v;
-	int64_t i, j, st = 0;
-	uint64_t *u, *u2, sum_qspan = 0;
-	float avg_qspan;
-	mm128_t *b, *w;
-
-	if (_u) *_u = 0, *n_u_ = 0;
-	if (n == 0 || a == 0) {
-		kfree(km, a);
-		return 0;
-	}
-	f = (int32_t*)kmalloc(km, n * 4);
-	p = (int32_t*)kmalloc(km, n * 4);
-	t = (int32_t*)kmalloc(km, n * 4);
-	v = (int32_t*)kmalloc(km, n * 4);
-	memset(t, 0, n * 4);
-
-	for (i = 0; i < n; ++i) sum_qspan += a[i].y>>32&0xff;
-	avg_qspan = (float)sum_qspan / n;
-
-	// fill the score and backtrack arrays
+void mm_chain_dp_fill(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter, int n_segs, int is_cdna, int64_t n, mm128_t *a, float avg_qspan, int32_t *f, int32_t *t, int32_t *p, int32_t *v)
+{
+	int64_t i, j, st=0;
 	for (i = 0; i < n; ++i) {
 		uint64_t ri = a[i].x;
 		int64_t max_j = -1;
@@ -83,6 +63,32 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
 		f[i] = max_f, p[i] = max_j;
 		v[i] = max_j >= 0 && v[max_j] > max_f? v[max_j] : max_f; // v[] keeps the peak score up to i; f[] is the score ending at i, not always the peak
 	}
+}
+
+mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter, int min_cnt, int min_sc, int is_cdna, int n_segs, int64_t n, mm128_t *a, int *n_u_, uint64_t **_u, void *km)
+{ // TODO: make sure this works when n has more than 32 bits
+	int32_t k, *f, *p, *t, *v, n_u, n_v;
+	int64_t i, j;
+	uint64_t *u, *u2, sum_qspan = 0;
+	float avg_qspan;
+	mm128_t *b, *w;
+
+	if (_u) *_u = 0, *n_u_ = 0;
+	if (n == 0 || a == 0) {
+		kfree(km, a);
+		return 0;
+	}
+	f = (int32_t*)kmalloc(km, n * 4);
+	p = (int32_t*)kmalloc(km, n * 4);
+	t = (int32_t*)kmalloc(km, n * 4);
+	v = (int32_t*)kmalloc(km, n * 4);
+	memset(t, 0, n * 4);
+
+	for (i = 0; i < n; ++i) sum_qspan += a[i].y>>32&0xff;
+	avg_qspan = (float)sum_qspan / n;
+
+	// fill the score and backtrack arrays
+	mm_chain_dp_fill(max_dist_x, max_dist_y, bw, max_skip, max_iter, n_segs, is_cdna, n, a, avg_qspan, f, t, p, v);
 
 	// find the ending positions of chains
 	memset(t, 0, n * 4);
