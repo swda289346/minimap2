@@ -129,3 +129,56 @@ __global__ void mm_chain_dp_fill_cuda_optimized(int64_t j, int64_t n, int max_di
 	}
 }
 
+__global__ void mm_chain_dp_fill_cuda_optimized_batch(int64_t j, int64_t n, int64_t start, int n_process, int max_dist_x, int max_dist_y, int bw, int max_iter, int n_segs, int is_cdna, mm128_t *a, float avg_qspan, int32_t *f, int32_t *t, int32_t *p, int32_t *v)
+{
+	int tid = blockIdx.x*blockDim.x+threadIdx.x;
+	if (tid>=max_iter)
+		return;
+	int64_t i = j+1+tid;
+	if (i>=n)
+		return;
+	i -= start;
+	j -= start;
+	if (j>=n_process)
+		return;
+	uint64_t ri = a[i].x;
+	int32_t qi = (int32_t)a[i].y, q_span = a[i].y>>32&0xff; // NB: only 8 bits of span is used!!!
+	int32_t sidi = (a[i].y & MM_SEED_SEG_MASK) >> MM_SEED_SEG_SHIFT;
+	int64_t max_j = -1;
+	int32_t max_f = q_span;
+	if (ri > a[j].x + max_dist_x)
+		return;
+	int32_t min_d;
+	int64_t dr = ri - a[j].x;
+	int32_t dq = qi - (int32_t)a[j].y, dd, sc, log_dd;
+	int32_t sidj = (a[j].y & MM_SEED_SEG_MASK) >> MM_SEED_SEG_SHIFT;
+	if ((sidi == sidj && dr == 0) || dq <= 0) return; // don't skip if an anchor is used by multiple segments; see below
+	if ((sidi == sidj && dq > max_dist_y) || dq > max_dist_x) return;
+	dd = dr > dq? dr - dq : dq - dr;
+	if (sidi == sidj && dd > bw) return;
+	if (n_segs > 1 && !is_cdna && sidi == sidj && dr > max_dist_y) return;
+	min_d = dq < dr? dq : dr;
+	sc = min_d > q_span? q_span : dq < dr? dq : dr;
+	log_dd = dd? 31-__clz(dd) : 0;
+	if (is_cdna || sidi != sidj) {
+		int c_log, c_lin;
+		c_lin = (int)(dd * .01 * avg_qspan);
+		c_log = log_dd;
+		if (sidi != sidj && dr == 0) ++sc; // possibly due to overlapping paired ends; give a minor bonus
+		else if (dr > dq || sidi != sidj) sc -= c_lin < c_log? c_lin : c_log;
+		else sc -= c_lin + (c_log>>1);
+	} else sc -= (int)(dd * .01 * avg_qspan) + (log_dd>>1);
+	sc += f[j];
+	if (sc > max_f) {
+		max_f = sc, max_j = j;
+	}
+	if (p[j] >= 0) t[p[j]-start] = i+start;
+	if (max_f>f[i]||(max_f==f[i]&&max_j!=-1))
+	{
+		f[i] = max_f, p[i] = max_j;
+		if (max_j!=-1)
+			p[i] = max_j+start;
+		v[i] = max_j >= 0 && v[max_j] > max_f? v[max_j] : max_f; // v[] keeps the peak score up to i; f[] is the score ending at i, not always the peak
+	}
+}
+
