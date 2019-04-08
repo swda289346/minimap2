@@ -4,6 +4,7 @@
 #include "minimap.h"
 #include "mmpriv.h"
 #include "kalloc.h"
+#include "chain_cuda.h"
 
 static const char LogTable256[256] = {
 #define LT(n) n, n, n, n, n, n, n, n, n, n, n, n, n, n, n, n
@@ -88,7 +89,7 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
 	avg_qspan = (float)sum_qspan / n;
 
 	// fill the score and backtrack arrays
-	mm_chain_dp_fill(max_dist_x, max_dist_y, bw, max_skip, max_iter, n_segs, is_cdna, n, a, avg_qspan, f, t, p, v);
+	mm_chain_dp_fill_cuda(max_dist_x, max_dist_y, bw, max_skip, max_iter, n_segs, is_cdna, n, a, avg_qspan, f, t, p, v);
 
 	// find the ending positions of chains
 	memset(t, 0, n * 4);
